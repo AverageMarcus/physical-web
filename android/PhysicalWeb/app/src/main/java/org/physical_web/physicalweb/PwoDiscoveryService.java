@@ -39,11 +39,24 @@ import android.widget.RemoteViews;
 
 import org.json.JSONException;
 
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.OptionalDataException;
+import java.io.OutputStreamWriter;
+import java.io.StreamCorruptedException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -66,6 +79,8 @@ public class PwoDiscoveryService extends Service
                                  implements PwsClient.ResolveScanCallback,
                                             PwsClient.DownloadIconCallback,
                                             PwoDiscoverer.PwoDiscoveryCallback {
+
+
 
   private static final String TAG = "PwoDiscoveryService";
   private static final String NOTIFICATION_GROUP_KEY = "URI_BEACON_NOTIFICATIONS";
@@ -93,6 +108,8 @@ public class PwoDiscoveryService extends Service
   private HashMap<String, PwoMetadata> mUrlToPwoMetadata;
   private List<PwoDiscoverer> mPwoDiscoverers;
   private List<PwoResponseCallback> mPwoResponseCallbacks;
+  private Set<String> mIgnorePatters;
+  private String mIgnorePattersFilePath;
 
   // Notification of urls happens as follows:
   // 0. Begin scan
@@ -152,6 +169,7 @@ public class PwoDiscoveryService extends Service
     mHandler = new Handler();
     mUrlToPwoMetadata = new HashMap<>();
     mCanUpdateNotifications = false;
+    mIgnorePattersFilePath = getExternalFilesDir(null) + "/IgnorePatterns.txt";
   }
 
   private void restoreCache() {
@@ -201,6 +219,34 @@ public class PwoDiscoveryService extends Service
     mHandler.postDelayed(mSecondScanTimeout, SECOND_SCAN_TIME_MILLIS);
     for (PwoDiscoverer pwoDiscoverer : mPwoDiscoverers) {
       pwoDiscoverer.startScan();
+    }
+
+    if(mIgnorePatters == null){
+      mIgnorePatters = new HashSet<String>();
+    }
+
+    try {
+      InputStreamReader inputStream = new InputStreamReader(new FileInputStream(mIgnorePattersFilePath));
+      BufferedReader bufferedReader = new BufferedReader(inputStream);
+      String receiveString = "";
+      StringBuilder fileContents = new StringBuilder();
+      while ((receiveString = bufferedReader.readLine()) != null ) {
+        fileContents.append(receiveString);
+      }
+      inputStream.close();
+
+      String[] patterns = fileContents.toString().split("\n");
+      for(String pattern : patterns){
+        mIgnorePatters.add(pattern);
+      }
+    } catch (FileNotFoundException e) {
+      Log.w(TAG, "Unable to import URL ignores");
+    } catch (StreamCorruptedException e) {
+      Log.w(TAG, "Unable to import URL ignores");
+    } catch (OptionalDataException e) {
+      Log.w(TAG, "Unable to import URL ignores");
+    } catch (IOException e) {
+      Log.w(TAG, "Unable to import URL ignores");
     }
   }
 
@@ -297,6 +343,14 @@ public class PwoDiscoveryService extends Service
 
   @Override
   public void onPwoDiscovered(PwoMetadata pwoMetadata) {
+    if(mIgnorePatters != null && !mIgnorePatters.isEmpty()) {
+      for (String pattern : mIgnorePatters) {
+        if (pwoMetadata.url.matches("(?i:" + pattern + ")")) {
+          return;
+        }
+      }
+    }
+
     PwoMetadata storedPwoMetadata = mUrlToPwoMetadata.get(pwoMetadata.url);
     if (storedPwoMetadata == null) {
       mUrlToPwoMetadata.put(pwoMetadata.url, pwoMetadata);

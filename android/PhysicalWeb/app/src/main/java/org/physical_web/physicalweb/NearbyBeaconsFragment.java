@@ -44,12 +44,22 @@ import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OptionalDataException;
+import java.io.StreamCorruptedException;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -78,6 +88,8 @@ public class NearbyBeaconsFragment extends ListFragment
   private SwipeRefreshWidget mSwipeRefreshWidget;
   private boolean mDebugViewEnabled = false;
   private boolean mSecondScanComplete;
+  private Set<String> mIgnorePatters;
+  private String mIgnorePattersFilePath;
 
   // The display of gathered urls happens as follows
   // 0. Begin scan
@@ -192,7 +204,7 @@ public class NearbyBeaconsFragment extends ListFragment
 
     mSwipeRefreshWidget = (SwipeRefreshWidget) rootView.findViewById(R.id.swipe_refresh_widget);
     mSwipeRefreshWidget.setColorSchemeResources(R.color.swipe_refresh_widget_first_color,
-                                                R.color.swipe_refresh_widget_second_color);
+            R.color.swipe_refresh_widget_second_color);
     mSwipeRefreshWidget.setOnRefreshListener(this);
 
     getActivity().getActionBar().setTitle(R.string.title_nearby_beacons);
@@ -204,6 +216,35 @@ public class NearbyBeaconsFragment extends ListFragment
         (AnimationDrawable) mScanningAnimationTextView.getCompoundDrawables()[1];
     ListView listView = (ListView) rootView.findViewById(android.R.id.list);
     listView.setOnItemLongClickListener(mAdapterViewItemLongClickListener);
+    mIgnorePattersFilePath = getActivity().getExternalFilesDir(null) + "/IgnorePatterns.txt";
+
+    if(mIgnorePatters == null){
+      mIgnorePatters = new HashSet<String>();
+    }
+
+    try {
+      InputStreamReader inputStream = new InputStreamReader(new FileInputStream(mIgnorePattersFilePath));
+      BufferedReader bufferedReader = new BufferedReader(inputStream);
+      String receiveString = "";
+      StringBuilder fileContents = new StringBuilder();
+      while ((receiveString = bufferedReader.readLine()) != null ) {
+        fileContents.append(receiveString);
+      }
+      inputStream.close();
+
+      String[] patterns = fileContents.toString().split("\n");
+      for(String pattern : patterns){
+        mIgnorePatters.add(pattern);
+      }
+    } catch (FileNotFoundException e) {
+      Log.w(TAG, "Unable to import URL ignores");
+    } catch (StreamCorruptedException e) {
+      Log.w(TAG, "Unable to import URL ignores");
+    } catch (OptionalDataException e) {
+      Log.w(TAG, "Unable to import URL ignores");
+    } catch (IOException e) {
+      Log.w(TAG, "Unable to import URL ignores");
+    }
   }
 
   public View onCreateView(LayoutInflater layoutInflater, ViewGroup container,
@@ -317,6 +358,12 @@ public class NearbyBeaconsFragment extends ListFragment
 
   @Override
   public void onPwoDiscovered(PwoMetadata pwoMetadata) {
+    for (String pattern : mIgnorePatters) {
+      if (pwoMetadata.url.matches("(?i:" + pattern + ")")) {
+        return;
+      }
+    }
+
     if (!mUrlToPwoMetadata.containsKey(pwoMetadata.url)) {
       mUrlToPwoMetadata.put(pwoMetadata.url, pwoMetadata);
       mPwoMetadataQueue.add(pwoMetadata);
@@ -424,6 +471,7 @@ public class NearbyBeaconsFragment extends ListFragment
 
       // Get the metadata for the given position
       PwoMetadata pwoMetadata = getItem(i);
+
       if (pwoMetadata.hasUrlMetadata()) {
         // If the url metadata exists
         UrlMetadata urlMetadata = pwoMetadata.urlMetadata;
